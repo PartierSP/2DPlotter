@@ -1,0 +1,312 @@
+' Gambas class file
+
+Public RTS As Boolean
+Public AbsMode As Boolean
+
+Public Sub SerialPort3D_Read()
+
+
+  Dim strReceived As String
+  Dim strRec As New String[4]
+  Dim i As Integer
+
+  'Small pause to allow full line to be buffered
+  Sleep 0.01
+
+  Try Read #SerialPort3D, strReceived, Lof(SerialPort3D)
+  If Error Then
+    strReceived = ""
+  Else
+    Debug strReceived
+    strRec = Split(strReceived, "\n")
+     For i = 0 To strRec.Length - 1
+       If Left(strRec[i], 2) = "ok" Then
+        RTS = True
+       Endif
+'       strReceived = strRec[i]
+'       Select Left(strReceived, 4)
+'         Case "ok X"
+'           'Got a position reading
+'           ReadPosition(strReceived) 
+'         Case "ok T"
+'           'Got a temperature reading
+'           ReadTemperature(strReceived)
+'         Case Else
+'           Select Left(strReceived, 2)
+'             Case " T"
+'               strReceived = "ok" & strReceived
+'               ReadTemperature(strReceived)
+'             Case "X:"
+'               strReceived = "ok " & strReceived
+'               ReadPosition(strReceived)
+'             Case Else
+' '              TextArea1.Text = TextArea1.Text & strReceived
+'           End Select 
+'       End Select
+     Next
+  Endif
+
+Catch
+  Me.Text = Error.Text
+
+End
+
+Public Sub SendSerialData(strMessage As String)
+
+  strMessage &= gb.Lf
+
+  SerialPort3D.Begin()
+  Write #SerialPort3D, strMessage
+  SerialPort3D.Send()
+  RTS = False
+  Debug strMessage
+
+Catch
+  'FIXME: if stream is closed then stop requesting temperature/location
+  Me.Text = Error.Text
+
+End
+
+Public Sub BtPlot_Click()
+
+  ' Dim i As Integer
+  ' Dim strSend As New String[]
+  ' Dim istrSendLength As Integer
+  ' 
+  ' strSend = Split(ta_Send.Text, "\n")
+  ' istrSendLength = strSend.Length - 1
+  ' Debug "istrSendLength: "; istrSendLength
+  ' For i = 0 To istrSendLength
+  '   Debug strSend[i]
+  '   SerialPort3D.Begin()
+  '   Write #SerialPort3D, strSend[i] & gb.Lf
+  '   SerialPort3D.Send()
+  '   ProgressBar1.Value = (i / istrSendLength - 1) * 100
+  ' Next
+
+  Translate(ta_Send.Text)
+End
+
+Public Sub Form_Open()
+
+  With SerialPort3D
+    .PortName = "/dev/ttyUSB0"
+    .Speed = 115200
+    .DataBits = SerialPort.Bits8
+    .StopBits = SerialPort.Bits1
+    .Parity = SerialPort.None
+    .FlowControl = SerialPort.Both
+    .Open()
+  End With
+
+End
+
+Public Sub Form_Close()
+
+  SerialPort3D.Close()
+
+End
+
+Public Sub BtOpen_Click()
+
+  Dialog.Title = ("Select a plot file")
+  Dialog.Filter = ["*.hpgl;*.plt", "Plot files"]
+  Dialog.FilterIndex = 0
+  If Not Dialog.OpenFile() Then 
+    ta_Send.Text = Dialog.Path
+  Endif
+
+End
+
+Public Sub Translate(sFile As String)
+  
+  Dim hFile As Stream
+  Dim sLine As String
+  Dim sChar As String
+  Dim sOneLine As String
+  Dim sStack As String
+  Dim X As Single
+  Dim Y As Single
+  Dim I As Integer
+
+  RTS = True
+  hFile = Open sFile For Input
+  While Not Eof(hFile)
+    Line Input #hFile, sOneLine
+    While Len(sOneLine) > 0
+      sChar = Left(sOneLine, 1)
+      If (sChar <= "Z") And (sChar >= "A") Then
+        sStack &= sChar
+      Else 
+        Select Case sStack
+          Case "IN"   'Initalize Ploter
+            While RTS = False
+              Wait 0.01
+            Wend
+            SendSerialData("G80") 'Cancel current motion modes
+            While RTS = False
+              Wait 0.01
+            Wend
+            SendSerialData("G90") 'Set to absolute measurements
+            AbsMode = True
+            While RTS = False
+              Wait 0.01
+            Wend
+            SendSerialData("G21") 'Set to metric scaling
+
+          Case "IP"   'Reset Scaling
+            'Not Implemented
+            
+          Case "IW"   'Input Window
+            'Not Implemented
+            
+          Case "PA"   'Plot Absolute
+            If AbsMode = False Then
+              While RTS = False
+                Wait 0.01
+              Wend
+              SendSerialData("G90") 'Set to absolute measurements
+              AbsMode = True
+            Endif
+
+          Case "PD"   'Pen Down
+            'Move Pen Down
+            While RTS = False
+              Wait 0.01
+            Wend
+            SendSerialData("G0 Z0")
+            
+            'Loop through X Y coordenents until a ; is found
+            While sChar <> ";"
+              'Extract X position
+              sStack = ""
+              sChar = ""
+              Repeat 
+                sStack &= sChar
+                sChar = Left(sOneLine, 1)
+                sOneLine = Right(sOneLine, -1)
+              Until Len(sOneLine) = 0 Or sChar = "," 
+              X = Val(sStack) / 40
+              
+              'Extract Y position
+              sStack = ""
+              sChar = ""
+              Repeat
+                sStack &= sChar
+                sChar = Left(sOneLine, 1)
+                sOneLine = Right(sOneLine, -1)
+              Until Len(sOneLine) = 0 Or (sChar = "," Or sChar = ";")
+              Y = Val(sStack) / 40
+              
+              'Move to location
+              While RTS = False
+                Wait 0.01
+              Wend
+              SendSerialData("G1 X" & Round(X, -2) & " Y" & Round(Y, -2))
+            Wend
+            sOneLine = ";" & sOneLine
+          
+          Case "PR"   'Plot Relative
+            If AbsMode = True Then
+              While RTS = False
+                Wait 0.01
+              Wend
+              SendSerialData("G91") 'Set to relative measurements
+              AbsMode = False
+            Endif
+
+          Case "PU"   'Pen Up
+            'Move to rapid plane
+            While RTS = False
+              Wait 0.01
+            Wend
+            SendSerialData("G0 Z2")
+            
+            'Extract X position
+            sStack = ""
+            sChar = ""
+            Repeat 
+              sStack &= sChar
+              sChar = Left(sOneLine, 1)
+              sOneLine = Right(sOneLine, -1)
+            Until Len(sOneLine) = 0 Or sChar = "," Or sChar = ";"
+            If sChar = ";" Then Goto ExitPU 'Skip positional change
+            X = Val(sStack) / 40
+            
+            'Extract Y position
+            sStack = ""
+            sChar = ""
+            Repeat 
+              sStack &= sChar
+              sChar = Left(sOneLine, 1)
+              sOneLine = Right(sOneLine, -1)
+            Until Len(sOneLine) = 0 Or sChar = ";"
+            Y = Val(sStack) / 40
+            
+            'Move to PU location
+            While RTS = False
+              Wait 0.01
+            Wend
+            SendSerialData("G0 X" & Round(X, -2) & " Y" & Round(Y, -2))
+            sOneLine = ";" & sOneLine
+            ExitPU:
+
+          Case "RO"   'Rotate Coordinate System
+            'Not Implemented
+
+          Case "SC"   'Scale
+            'Not Implemented
+              
+          Case "SP"   'Pen Select
+            'Perform tool change
+            
+          Case "VS"   'Velocity Select
+            'Not Implemented.
+            
+        End Select
+        sStack = ""
+      Endif
+      sOneLine = Right(sOneLine, -1)
+    Wend 
+  Wend
+  Close #hFile
+End
+
+Public Sub getxy()
+  Dim sChar As String
+  Dim sStack As String
+  Dim sOneLine As String
+  Dim X As Single
+  Dim Y As Single
+  
+  sStack = ""
+  sChar = Left(sOneLine, 1)
+  If (sChar > 9 Or sChar < 0) And (sChar <> "-") Then
+    Return 
+  Endif
+  
+  While (sChar <= 9 And sChar >= 0) Or sChar = "-"
+    sStack &= sChar
+    sOneLine = Right(sOneLine, -1)
+    sChar = Left(sOneLine, 1)
+  Wend
+  X = Val(sStack) / 40
+  
+  If sChar <> "," Then
+    'Missing Y value so lets abort
+    Return
+  Endif
+  
+  sStack = ""
+  sOneLine = Right(sOneLine, -1)
+  sChar = Left(sOneLine, 1)
+  
+  While ((sChar <= 9 And sChar >= 0) Or sChar = "-") And Len(sOneLine) > 0
+    sStack &= sChar
+    sOneLine = Right(sOneLine, -1)
+    sChar = Left(sOneLine, 1)
+  Wend
+  Y = Val(sStack) / 40
+  
+  Return "X" & Round(X, -2) & " Y" & Round(Y, -2)
+End

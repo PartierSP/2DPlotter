@@ -1,0 +1,69 @@
+# Gambas Form File 3.0
+
+{ Form Form
+  MoveScaled(0,0,64,64)
+  Arrangement = Arrange.Row
+  Margin = True
+  Padding = 10
+  { Label1 Label
+    MoveScaled(2,3,8,4)
+    Alignment = Align.Right
+    Text = ("Length")
+  }
+  { vbSizeX ValueBox
+    MoveScaled(12,3,37,4)
+    Expand = True
+  }
+  { Label2 Label
+    MoveScaled(2,8,8,4)
+    Alignment = Align.Right
+    Text = ("Height")
+  }
+  { vbSizeY ValueBox
+    MoveScaled(12,8,37,4)
+    Expand = True
+  }
+  { Frame1 Frame
+    MoveScaled(2,16,59,28)
+    Drop = True
+    Expand = True
+    Arrangement = Arrange.Fill
+    AutoResize = True
+    Spacing = True
+    Margin = True
+    Padding = 5
+    Text = ("Text")
+    Alignment = Align.Left
+    { ta_Send TextArea
+      MoveScaled(2,3,56,23)
+      Expand = True
+    }
+  }
+  { HBox1 HBox
+    MoveScaled(2,45,59,6)
+    Expand = True
+    Padding = 5
+    { BtOpen Button
+      MoveScaled(1,0,14,5)
+      Text = Shortcut(("Open"), "O")
+    }
+    { Spring1 Spring
+      MoveScaled(15,1,24,3)
+    }
+    { BtPlot Button
+      MoveScaled(40,0,16,5)
+      Text = ("Plot")
+    }
+  }
+  { ProgressBar1 ProgressBar
+    MoveScaled(3,53,58,6)
+    Expand = True
+  }
+  { Button1 Button
+    MoveScaled(24,60,16,3)
+  }
+  { SerialPort3D #SerialPort
+    #MoveScaled(51,5)
+    Speed = 115200
+  }
+}
