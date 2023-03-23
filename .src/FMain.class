@@ -2,6 +2,7 @@
 
 Public RTS As Boolean
 Public AbsMode As Boolean
+Public sOneLine As String
 
 Public Sub SerialPort3D_Read()
 
@@ -23,26 +24,6 @@ Public Sub SerialPort3D_Read()
        If Left(strRec[i], 2) = "ok" Then
         RTS = True
        Endif
-'       strReceived = strRec[i]
-'       Select Left(strReceived, 4)
-'         Case "ok X"
-'           'Got a position reading
-'           ReadPosition(strReceived) 
-'         Case "ok T"
-'           'Got a temperature reading
-'           ReadTemperature(strReceived)
-'         Case Else
-'           Select Left(strReceived, 2)
-'             Case " T"
-'               strReceived = "ok" & strReceived
-'               ReadTemperature(strReceived)
-'             Case "X:"
-'               strReceived = "ok " & strReceived
-'               ReadPosition(strReceived)
-'             Case Else
-' '              TextArea1.Text = TextArea1.Text & strReceived
-'           End Select 
-'       End Select
      Next
   Endif
 
@@ -69,22 +50,8 @@ End
 
 Public Sub BtPlot_Click()
 
-  ' Dim i As Integer
-  ' Dim strSend As New String[]
-  ' Dim istrSendLength As Integer
-  ' 
-  ' strSend = Split(ta_Send.Text, "\n")
-  ' istrSendLength = strSend.Length - 1
-  ' Debug "istrSendLength: "; istrSendLength
-  ' For i = 0 To istrSendLength
-  '   Debug strSend[i]
-  '   SerialPort3D.Begin()
-  '   Write #SerialPort3D, strSend[i] & gb.Lf
-  '   SerialPort3D.Send()
-  '   ProgressBar1.Value = (i / istrSendLength - 1) * 100
-  ' Next
-
   Translate(ta_Send.Text)
+
 End
 
 Public Sub Form_Open()
@@ -121,13 +88,22 @@ End
 Public Sub Translate(sFile As String)
   
   Dim hFile As Stream
-  Dim sLine As String
   Dim sChar As String
-  Dim sOneLine As String
   Dim sStack As String
   Dim X As Single
   Dim Y As Single
-  Dim I As Integer
+
+  'Reset Plotter current posistion as X0
+  While RTS = False
+    Wait 0.01
+  Wend
+  SendSerialData("G92 X0")
+
+  'Reset Plotter current posistion as Y0
+  While RTS = False
+    Wait 0.01
+  Wend
+  SendSerialData("G92 Y0")
 
   RTS = True
   hFile = Open sFile For Input
@@ -135,8 +111,9 @@ Public Sub Translate(sFile As String)
     Line Input #hFile, sOneLine
     While Len(sOneLine) > 0
       sChar = Left(sOneLine, 1)
-      If (sChar <= "Z") And (sChar >= "A") Then
+      If ((sChar <= "Z") And (sChar >= "A")) And Len(sStack) < 2 Then
         sStack &= sChar
+        sOneLine = Right(sOneLine, -1)
       Else 
         Select Case sStack
           Case "IN"   'Initalize Ploter
@@ -169,43 +146,64 @@ Public Sub Translate(sFile As String)
               AbsMode = True
             Endif
 
+            'Check if a moment is required
+            sChar = Left(sOneLine, 1)
+            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+              Repeat 
+                If sChar = "," Then
+                  sOneLine = Right(sOneLine, -1)
+                Endif  
+                sStack = getxy()
+                If sStack > "" Then
+                  While RTS = False
+                    Wait 0.01
+                  Wend
+                  SendSerialData("G1 " & sStack)
+                Endif
+                sChar = Left(sOneLine, 1)
+              Until sChar <> ","
+            Endif
+
           Case "PD"   'Pen Down
+            'Z motions must be in Absolute mode
+            If AbsMode = False Then
+              While RTS = False
+                Wait 0.01
+              Wend
+              SendSerialData("G90")
+            Endif
+
             'Move Pen Down
             While RTS = False
               Wait 0.01
             Wend
             SendSerialData("G0 Z0")
-            
-            'Loop through X Y coordenents until a ; is found
-            While sChar <> ";"
-              'Extract X position
-              sStack = ""
-              sChar = ""
-              Repeat 
-                sStack &= sChar
-                sChar = Left(sOneLine, 1)
-                sOneLine = Right(sOneLine, -1)
-              Until Len(sOneLine) = 0 Or sChar = "," 
-              X = Val(sStack) / 40
-              
-              'Extract Y position
-              sStack = ""
-              sChar = ""
-              Repeat
-                sStack &= sChar
-                sChar = Left(sOneLine, 1)
-                sOneLine = Right(sOneLine, -1)
-              Until Len(sOneLine) = 0 Or (sChar = "," Or sChar = ";")
-              Y = Val(sStack) / 40
-              
-              'Move to location
+
+            'Return to Relative mode if required
+            If AbsMode = False Then
               While RTS = False
                 Wait 0.01
               Wend
-              SendSerialData("G1 X" & Round(X, -2) & " Y" & Round(Y, -2))
-            Wend
-            sOneLine = ";" & sOneLine
-          
+              SendSerialData("G91")
+            Endif
+            
+            sChar = Left(sOneLine, 1)
+            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+              Repeat 
+                If sChar = "," Then
+                  sOneLine = Right(sOneLine, -1)
+                Endif  
+                sStack = getxy()
+                If sStack > "" Then
+                  While RTS = False
+                    Wait 0.01
+                  Wend
+                  SendSerialData("G1 " & sStack)
+                Endif
+                sChar = Left(sOneLine, 1)
+              Until sChar <> ","
+            Endif
+
           Case "PR"   'Plot Relative
             If AbsMode = True Then
               While RTS = False
@@ -215,41 +213,58 @@ Public Sub Translate(sFile As String)
               AbsMode = False
             Endif
 
+            'Check if a movement is required
+            sChar = Left(sOneLine, 1)
+            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+              Repeat 
+                If sChar = "," Then
+                  sOneLine = Right(sOneLine, -1)
+                Endif  
+                sStack = getxy()
+                If sStack > "" Then
+                  While RTS = False
+                    Wait 0.01
+                  Wend
+                  SendSerialData("G1 " & sStack)
+                Endif
+                sChar = Left(sOneLine, 1)
+              Until sChar <> ","
+            Endif
+
           Case "PU"   'Pen Up
+            'Z motions must be in Absolute mode
+            If AbsMode = False Then
+              While RTS = False
+                Wait 0.01
+              Wend
+              SendSerialData("G90")
+            Endif
+
             'Move to rapid plane
             While RTS = False
               Wait 0.01
             Wend
             SendSerialData("G0 Z2")
-            
-            'Extract X position
-            sStack = ""
-            sChar = ""
-            Repeat 
-              sStack &= sChar
-              sChar = Left(sOneLine, 1)
-              sOneLine = Right(sOneLine, -1)
-            Until Len(sOneLine) = 0 Or sChar = "," Or sChar = ";"
-            If sChar = ";" Then Goto ExitPU 'Skip positional change
-            X = Val(sStack) / 40
-            
-            'Extract Y position
-            sStack = ""
-            sChar = ""
-            Repeat 
-              sStack &= sChar
-              sChar = Left(sOneLine, 1)
-              sOneLine = Right(sOneLine, -1)
-            Until Len(sOneLine) = 0 Or sChar = ";"
-            Y = Val(sStack) / 40
-            
-            'Move to PU location
-            While RTS = False
-              Wait 0.01
-            Wend
-            SendSerialData("G0 X" & Round(X, -2) & " Y" & Round(Y, -2))
-            sOneLine = ";" & sOneLine
-            ExitPU:
+
+            'Return to Relative mode if required
+            If AbsMode = False Then
+              While RTS = False
+                Wait 0.01
+              Wend
+              SendSerialData("G91")
+            Endif
+
+            sChar = Left(sOneLine, 1)
+            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+              'Get and move to PU location
+              sStack = getxy()
+              If sStack > "" Then
+                While RTS = False
+                  Wait 0.01
+                Wend
+                SendSerialData("G0 " & sStack)
+              Endif
+            Endif
 
           Case "RO"   'Rotate Coordinate System
             'Not Implemented
@@ -263,29 +278,29 @@ Public Sub Translate(sFile As String)
           Case "VS"   'Velocity Select
             'Not Implemented.
             
+          Default 
+            sOneLine = Right(sOneLine, -1)
         End Select
         sStack = ""
       Endif
-      sOneLine = Right(sOneLine, -1)
     Wend 
   Wend
   Close #hFile
 End
 
-Public Sub getxy()
+Public Sub getxy() As String
   Dim sChar As String
   Dim sStack As String
-  Dim sOneLine As String
   Dim X As Single
   Dim Y As Single
   
   sStack = ""
   sChar = Left(sOneLine, 1)
-  If (sChar > 9 Or sChar < 0) And (sChar <> "-") Then
-    Return 
+  If (sChar > "9" Or sChar < "0") And (sChar <> "-") Then
+    Return ""
   Endif
   
-  While (sChar <= 9 And sChar >= 0) Or sChar = "-"
+  While (sChar <= "9" And sChar >= "0") Or sChar = "-"
     sStack &= sChar
     sOneLine = Right(sOneLine, -1)
     sChar = Left(sOneLine, 1)
@@ -294,14 +309,14 @@ Public Sub getxy()
   
   If sChar <> "," Then
     'Missing Y value so lets abort
-    Return
+    Return ""
   Endif
   
   sStack = ""
   sOneLine = Right(sOneLine, -1)
   sChar = Left(sOneLine, 1)
   
-  While ((sChar <= 9 And sChar >= 0) Or sChar = "-") And Len(sOneLine) > 0
+  While ((sChar <= "9" And sChar >= "0") Or sChar = "-") And Len(sOneLine) > 0
     sStack &= sChar
     sOneLine = Right(sOneLine, -1)
     sChar = Left(sOneLine, 1)
