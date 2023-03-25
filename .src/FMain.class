@@ -6,7 +6,6 @@ Public sOneLine As String
 
 Public Sub SerialPort3D_Read()
 
-
   Dim strReceived As String
   Dim strRec As New String[4]
   Dim i As Integer
@@ -90,8 +89,7 @@ Public Sub Translate(sFile As String)
   Dim hFile As Stream
   Dim sChar As String
   Dim sStack As String
-  Dim X As Single
-  Dim Y As Single
+  Dim LastAbsMode As Boolean
 
   'Reset Plotter current posistion as X0
   While RTS = False
@@ -138,133 +136,40 @@ Public Sub Translate(sFile As String)
             'Not Implemented
             
           Case "PA"   'Plot Absolute
-            If AbsMode = False Then
-              While RTS = False
-                Wait 0.01
-              Wend
-              SendSerialData("G90") 'Set to absolute measurements
-              AbsMode = True
-            Endif
-
-            'Check if a moment is required
-            sChar = Left(sOneLine, 1)
-            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
-              Repeat 
-                If sChar = "," Then
-                  sOneLine = Right(sOneLine, -1)
-                Endif  
-                sStack = getxy()
-                If sStack > "" Then
-                  While RTS = False
-                    Wait 0.01
-                  Wend
-                  SendSerialData("G1 " & sStack)
-                Endif
-                sChar = Left(sOneLine, 1)
-              Until sChar <> ","
-            Endif
+            PAMode(True)
 
           Case "PD"   'Pen Down
-            'Z motions must be in Absolute mode
-            If AbsMode = False Then
-              While RTS = False
-                Wait 0.01
-              Wend
-              SendSerialData("G90")
+            PenDown(True)
+
+          Case "PE"   'Polyline Encoded
+            LastAbsMode = AbsMode
+            'Check for a flag char
+            If sChar = "<" Then
+              'Pen up, move to posistion provided.
+              sOneLine = Right(sOneLine, -1)
+              sChar = Left(sOneLine, 1)
+              PenUp(False)
             Endif
-
-            'Move Pen Down
-            While RTS = False
-              Wait 0.01
-            Wend
-            SendSerialData("G0 Z0")
-
-            'Return to Relative mode if required
-            If AbsMode = False Then
-              While RTS = False
-                Wait 0.01
-              Wend
-              SendSerialData("G91")
+            If sChar = "=" Then
+              'Absolute move
+              PAMode(False)
+              'Decode encoded moves
             Endif
             
-            sChar = Left(sOneLine, 1)
-            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
-              Repeat 
-                If sChar = "," Then
-                  sOneLine = Right(sOneLine, -1)
-                Endif  
-                sStack = getxy()
-                If sStack > "" Then
-                  While RTS = False
-                    Wait 0.01
-                  Wend
-                  SendSerialData("G1 " & sStack)
-                Endif
-                sChar = Left(sOneLine, 1)
-              Until sChar <> ","
+            'Check if we need to switch Absolute/Relative mode
+            If LastAbsMode <> AbsMode Then
+              If LastAbsMode = True Then
+                PAMode(False)
+              Else 
+                PRMode(False)
+              Endif
             Endif
 
           Case "PR"   'Plot Relative
-            If AbsMode = True Then
-              While RTS = False
-                Wait 0.01
-              Wend
-              SendSerialData("G91") 'Set to relative measurements
-              AbsMode = False
-            Endif
-
-            'Check if a movement is required
-            sChar = Left(sOneLine, 1)
-            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
-              Repeat 
-                If sChar = "," Then
-                  sOneLine = Right(sOneLine, -1)
-                Endif  
-                sStack = getxy()
-                If sStack > "" Then
-                  While RTS = False
-                    Wait 0.01
-                  Wend
-                  SendSerialData("G1 " & sStack)
-                Endif
-                sChar = Left(sOneLine, 1)
-              Until sChar <> ","
-            Endif
+            PRMode(True)
 
           Case "PU"   'Pen Up
-            'Z motions must be in Absolute mode
-            If AbsMode = False Then
-              While RTS = False
-                Wait 0.01
-              Wend
-              SendSerialData("G90")
-            Endif
-
-            'Move to rapid plane
-            While RTS = False
-              Wait 0.01
-            Wend
-            SendSerialData("G0 Z2")
-
-            'Return to Relative mode if required
-            If AbsMode = False Then
-              While RTS = False
-                Wait 0.01
-              Wend
-              SendSerialData("G91")
-            Endif
-
-            sChar = Left(sOneLine, 1)
-            If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
-              'Get and move to PU location
-              sStack = getxy()
-              If sStack > "" Then
-                While RTS = False
-                  Wait 0.01
-                Wend
-                SendSerialData("G0 " & sStack)
-              Endif
-            Endif
+            PenUp(True)
 
           Case "RO"   'Rotate Coordinate System
             'Not Implemented
@@ -324,4 +229,165 @@ Public Sub getxy() As String
   Y = Val(sStack) / 40
   
   Return "X" & Round(X, -2) & " Y" & Round(Y, -2)
+End
+
+Public Sub PenUp(CheckForMove As Boolean)
+
+  Dim sChar As String
+  Dim sStack As String
+
+  'Z motions must be in Absolute mode
+  If AbsMode = False Then
+    While RTS = False
+      Wait 0.01
+    Wend
+    SendSerialData("G90")
+  Endif
+
+  'Move to rapid plane
+  While RTS = False
+    Wait 0.01
+  Wend
+  SendSerialData("G0 Z2")
+
+  'Return to Relative mode if required
+  If AbsMode = False Then
+    While RTS = False
+      Wait 0.01
+    Wend
+    SendSerialData("G91")
+  Endif
+  
+  If CheckForMove = True Then
+    sChar = Left(sOneLine, 1)
+    If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+      'Get and move to PU location
+      sStack = getxy()
+      If sStack > "" Then
+        While RTS = False
+          Wait 0.01
+        Wend
+        SendSerialData("G0 " & sStack)
+      Endif
+    Endif
+  Endif 
+
+End
+
+Public Sub PenDown(CheckForMove As Boolean)
+
+  Dim sChar As String
+  Dim sStack As String
+
+  'Z motions must be in Absolute mode
+  If AbsMode = False Then
+    While RTS = False
+      Wait 0.01
+    Wend
+    SendSerialData("G90")
+  Endif
+
+  'Move Pen Down
+  While RTS = False
+    Wait 0.01
+  Wend
+  SendSerialData("G0 Z0")
+
+  'Return to Relative mode if required
+  If AbsMode = False Then
+    While RTS = False
+      Wait 0.01
+    Wend
+    SendSerialData("G91")
+  Endif
+  
+  If CheckForMove = True Then
+    sChar = Left(sOneLine, 1)
+    If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+      Repeat 
+        If sChar = "," Then
+          sOneLine = Right(sOneLine, -1)
+        Endif  
+        sStack = getxy()
+        If sStack > "" Then
+          While RTS = False
+            Wait 0.01
+          Wend
+          SendSerialData("G1 " & sStack)
+        Endif
+        sChar = Left(sOneLine, 1)
+      Until sChar <> ","
+    Endif
+  Endif 
+
+End
+
+Public Sub PAMode(CheckForMove As Boolean)
+
+  Dim sChar As String
+  Dim sStack As String
+
+  If AbsMode = False Then
+    While RTS = False
+      Wait 0.01
+    Wend
+    SendSerialData("G90") 'Set to absolute measurements
+    AbsMode = True
+  Endif
+
+  If CheckForMove = True Then
+    'Check if a moment is required
+    sChar = Left(sOneLine, 1)
+    If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+      Repeat 
+        If sChar = "," Then
+          sOneLine = Right(sOneLine, -1)
+        Endif  
+        sStack = getxy()
+        If sStack > "" Then
+          While RTS = False
+            Wait 0.01
+          Wend
+          SendSerialData("G1 " & sStack)
+        Endif
+        sChar = Left(sOneLine, 1)
+      Until sChar <> ","
+    Endif
+  Endif 
+
+End
+
+Public Sub PRMode(CheckForMove As Boolean)
+  
+  Dim sChar As String
+  Dim sStack As String
+
+  If AbsMode = True Then
+    While RTS = False
+      Wait 0.01
+    Wend
+    SendSerialData("G91") 'Set to relative measurements
+    AbsMode = False
+  Endif
+
+  If CheckForMove = True Then
+    'Check if a movement is required
+    sChar = Left(sOneLine, 1)
+    If (sChar <= "9" And sChar >= "0") Or sChar = "-" Then
+      Repeat 
+        If sChar = "," Then
+          sOneLine = Right(sOneLine, -1)
+        Endif  
+        sStack = getxy()
+        If sStack > "" Then
+          While RTS = False
+            Wait 0.01
+          Wend
+          SendSerialData("G1 " & sStack)
+        Endif
+        sChar = Left(sOneLine, 1)
+      Until sChar <> ","
+    Endif
+  Endif 
+
 End
